@@ -1,0 +1,14 @@
+{
+  "name": "geodb-cities-pdf-generator",
+  "version": "1.0.0",
+  "description": "Scripts para gerar PDF do guide.md",
+  "scripts": {
+    "pdf": "node generate-pdf-advanced.js",
+    "pdf-simple": "node generate-pdf.js"
+  },
+  "devDependencies": {
+    "puppeteer": "^21.0.0",
+    "marked": "^11.0.0",
+    "highlight.js": "^11.9.0"
+  }
+}

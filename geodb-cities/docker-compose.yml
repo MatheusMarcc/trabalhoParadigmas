@@ -1,0 +1,30 @@
+services:
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    volumes:
+      - ./nginx/static-html-directory:/usr/share/nginx/html
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    restart: always
+    ports:
+      - "8080:80"
+    container_name: nginx-server
+
+
+  node:
+    depends_on:
+      - nginx
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/home/node/app
+    restart: always
+    environment:
+      PORT: ${PORT}
+      RAPIDAPI_KEY: ${RAPIDAPI_KEY}
+    ports:
+      - "3000:3000"
+    container_name: node-app
