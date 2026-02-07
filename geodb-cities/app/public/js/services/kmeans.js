@@ -1,3 +1,11 @@
+import {
+  serializarPontos,
+  serializarCentroides,
+  estimarTamanhoBufferPontos,
+} from "../util/serializadorMemoriaCompartilhada.js";
+
+const sharedArrayBufferDisponivel = () => typeof SharedArrayBuffer !== "undefined";
+
 const normalizarDados = (pontos) => {
   if (pontos.length === 0) return { pontosNormalizados: [], faixas: null };
 
@@ -67,6 +75,26 @@ const atribuirPontosAosClusters = async (pontos, centroides, numWorkers = 4) => 
   const pontosPorWorker = Math.ceil(pontos.length / numWorkers);
   const workers = [];
   const promessas = [];
+  const usarMemoriaCompartilhada = sharedArrayBufferDisponivel();
+
+  let sharedPointsBuffer = null;
+  let sharedCentroidsBuffer = null;
+
+  // Prepara buffers compartilhados se disponível
+  if (usarMemoriaCompartilhada) {
+    try {
+      const bufferPontos = serializarPontos(pontos);
+      const bufferCentroides = serializarCentroides(centroides);
+
+      sharedPointsBuffer = new SharedArrayBuffer(bufferPontos.byteLength);
+      sharedCentroidsBuffer = new SharedArrayBuffer(bufferCentroides.byteLength);
+
+      new Uint8Array(sharedPointsBuffer).set(new Uint8Array(bufferPontos));
+      new Uint8Array(sharedCentroidsBuffer).set(new Uint8Array(bufferCentroides));
+    } catch (erro) {
+      console.warn("Erro ao criar SharedArrayBuffer, usando fallback:", erro);
+    }
+  }
 
   for (let i = 0; i < numWorkers; i++) {
     const indiceInicio = i * pontosPorWorker;
@@ -92,13 +120,19 @@ const atribuirPontosAosClusters = async (pontos, centroides, numWorkers = 4) => 
       };
     });
 
+    // Envia dados via memória compartilhada se disponível, senão usa postMessage
     worker.postMessage({
       type: "assign_points",
       data: {
-        points: pontos,
-        centroids: centroides,
+        points: usarMemoriaCompartilhada && sharedPointsBuffer ? null : pontos,
+        centroids: usarMemoriaCompartilhada && sharedCentroidsBuffer ? null : centroides,
         startIndex: indiceInicio,
         endIndex: indiceFim,
+        sharedPointsBuffer,
+        sharedCentroidsBuffer,
+        pointsOffset: 0,
+        centroidsOffset: 0,
+        useSharedMemory: usarMemoriaCompartilhada && sharedPointsBuffer && sharedCentroidsBuffer,
       },
     });
 
@@ -113,6 +147,20 @@ const atribuirPontosAosClusters = async (pontos, centroides, numWorkers = 4) => 
 const calcularNovosCentroides = async (clusters, pontos) => {
   return new Promise((resolver, rejeitar) => {
     const worker = new Worker("/js/workers/KmeansWorker.js", { type: "module" });
+    const usarMemoriaCompartilhada = sharedArrayBufferDisponivel();
+
+    let sharedPointsBuffer = null;
+
+    // Prepara buffer compartilhado se disponível
+    if (usarMemoriaCompartilhada) {
+      try {
+        const bufferPontos = serializarPontos(pontos);
+        sharedPointsBuffer = new SharedArrayBuffer(bufferPontos.byteLength);
+        new Uint8Array(sharedPointsBuffer).set(new Uint8Array(bufferPontos));
+      } catch (erro) {
+        console.warn("Erro ao criar SharedArrayBuffer para centroides, usando fallback:", erro);
+      }
+    }
 
     worker.onmessage = (evento) => {
       if (evento.data.type === "centroids_complete") {
@@ -128,9 +176,16 @@ const calcularNovosCentroides = async (clusters, pontos) => {
       rejeitar(erro);
     };
 
+    // Envia dados via memória compartilhada se disponível, senão usa postMessage
     worker.postMessage({
       type: "calculate_new_centroids",
-      data: { clusters, points: pontos },
+      data: {
+        clusters,
+        points: usarMemoriaCompartilhada && sharedPointsBuffer ? null : pontos,
+        sharedPointsBuffer,
+        pointsOffset: 0,
+        useSharedMemory: usarMemoriaCompartilhada && sharedPointsBuffer,
+      },
     });
   });
 };

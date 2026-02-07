@@ -1,8 +1,56 @@
-node_modules
-npm-debug.log
+# Git
 .git
 .gitignore
-README.md
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Node modules (será instalado no container)
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Environment
 .env
-*.md
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Build artifacts
+dist
+build
+*.bak
+
+# Documentation
+*.md
+!README.md
+
+# Scripts
+*.sh
+*.bat
+
+# Test
+coverage
+.nyc_output
+
+# Temporary files
+tmp
+temp
+*.tmp

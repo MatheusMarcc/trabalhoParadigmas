@@ -1,3 +1,5 @@
+import { desserializarPontos } from "../util/serializadorMemoriaCompartilhada.js";
+
 const distanciaEuclidiana = (ponto1, ponto2) => {
   const diffLat = ponto1.latitude - ponto2.latitude;
   const diffLon = ponto1.longitude - ponto2.longitude;
@@ -5,21 +7,62 @@ const distanciaEuclidiana = (ponto1, ponto2) => {
   return Math.sqrt(diffLat * diffLat + diffLon * diffLon + diffPop * diffPop);
 };
 
+// Funções de desserialização são importadas do módulo serializador
+
 self.onmessage = (evento) => {
   const { type, data } = evento.data;
 
   switch (type) {
     case "assign_points": {
-      const { points: pontos, centroids: centroides, startIndex: indiceInicio, endIndex: indiceFim } = data;
+      const {
+        points: pontos,
+        centroids: centroides,
+        startIndex: indiceInicio,
+        endIndex: indiceFim,
+        sharedPointsBuffer,
+        sharedCentroidsBuffer,
+        pointsOffset,
+        centroidsOffset,
+        useSharedMemory,
+      } = data;
+
+      let pontosProcessar = pontos;
+      let centroidesProcessar = centroides;
+
+      // Tenta usar memória compartilhada se disponível
+      if (useSharedMemory && sharedPointsBuffer && sharedCentroidsBuffer) {
+        try {
+          const pontosDesserializados = desserializarPontos(sharedPointsBuffer, pointsOffset || 0);
+          const centroidesDesserializados = desserializarPontos(sharedCentroidsBuffer, centroidsOffset || 0);
+
+          if (pontosDesserializados && centroidesDesserializados && pontosDesserializados.length > 0 && centroidesDesserializados.length > 0) {
+            pontosProcessar = pontosDesserializados;
+            centroidesProcessar = centroidesDesserializados;
+          } else {
+            console.warn("Falha ao desserializar da memória compartilhada, usando dados do postMessage");
+          }
+        } catch (erro) {
+          console.warn("Erro ao processar memória compartilhada:", erro);
+        }
+      }
+
+      if (!pontosProcessar || !centroidesProcessar) {
+        self.postMessage({
+          type: "error",
+          error: "Dados inválidos para processamento",
+        });
+        return;
+      }
+
       const atribuicoes = [];
 
-      for (let i = indiceInicio; i < indiceFim; i++) {
-        const ponto = pontos[i];
+      for (let i = indiceInicio; i < indiceFim && i < pontosProcessar.length; i++) {
+        const ponto = pontosProcessar[i];
         let distMinima = Infinity;
         let centroideMaisProximo = 0;
 
-        for (let j = 0; j < centroides.length; j++) {
-          const distancia = distanciaEuclidiana(ponto, centroides[j]);
+        for (let j = 0; j < centroidesProcessar.length; j++) {
+          const distancia = distanciaEuclidiana(ponto, centroidesProcessar[j]);
           if (distancia < distMinima) {
             distMinima = distancia;
             centroideMaisProximo = j;
@@ -43,7 +86,33 @@ self.onmessage = (evento) => {
     }
 
     case "calculate_new_centroids": {
-      const { clusters, points: pontos } = data;
+      const { clusters, points: pontos, sharedPointsBuffer, pointsOffset, useSharedMemory } = data;
+
+      let pontosProcessar = pontos;
+
+      // Tenta usar memória compartilhada se disponível
+      if (useSharedMemory && sharedPointsBuffer) {
+        try {
+          const pontosDesserializados = desserializarPontos(sharedPointsBuffer, pointsOffset || 0);
+
+          if (pontosDesserializados) {
+            pontosProcessar = pontosDesserializados;
+          } else {
+            console.warn("Falha ao desserializar pontos da memória compartilhada, usando dados do postMessage");
+          }
+        } catch (erro) {
+          console.warn("Erro ao processar memória compartilhada:", erro);
+        }
+      }
+
+      if (!pontosProcessar) {
+        self.postMessage({
+          type: "error",
+          error: "Dados inválidos para processamento",
+        });
+        return;
+      }
+
       const novosCentroides = [];
 
       for (let idCluster = 0; idCluster < clusters.length; idCluster++) {
@@ -59,10 +128,11 @@ self.onmessage = (evento) => {
         let somaPop = 0;
 
         for (const indicePonto of pontosCluster) {
-          const ponto = pontos[indicePonto];
+          if (indicePonto >= pontosProcessar.length) continue;
+          const ponto = pontosProcessar[indicePonto];
           somaLat += ponto.latitude;
           somaLon += ponto.longitude;
-          somaPop += ponto.population;
+          somaPop += ponto.population || 0;
         }
 
         const quantidade = pontosCluster.length;

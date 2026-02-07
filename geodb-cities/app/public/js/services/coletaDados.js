@@ -1,6 +1,109 @@
 import { estimarTamanhoBuffer, desserializarCidades } from "../util/serializadorMemoriaCompartilhada.js";
+import {
+  carregarCacheCidades,
+  salvarCacheCidades,
+  existeCacheValido,
+  carregarCidadesDoArquivo,
+} from "../util/cacheCidades.js";
 
 const sharedArrayBufferDisponivel = () => typeof SharedArrayBuffer !== "undefined";
+
+/**
+ * Carrega cidades com estratégia cache-first: verifica arquivo estático, depois cache, depois rede
+ * @param {number} cidadesAlvo - Número de cidades desejadas
+ * @param {number} limitePorPagina - Limite de cidades por página na API
+ * @param {Function} aoProgresso - Callback de progresso
+ * @param {boolean} forcarAtualizacao - Se true, ignora cache e força atualização
+ * @returns {Promise<Array>} Array de cidades carregadas
+ */
+export const carregarCidadesComCache = async (
+  cidadesAlvo = 10000,
+  limitePorPagina = 10,
+  aoProgresso,
+  forcarAtualizacao = false
+) => {
+  // 1. PRIMEIRA PRIORIDADE: Tenta carregar do arquivo estático (sample-cities.json.bak)
+  if (!forcarAtualizacao) {
+    try {
+      const cidadesArquivo = await carregarCidadesDoArquivo();
+      if (cidadesArquivo && cidadesArquivo.length > 0) {
+        console.log(`Arquivo estático encontrado: ${cidadesArquivo.length} cidades. Usando dados do arquivo.`);
+        
+        // Notifica progresso de arquivo estático
+        if (aoProgresso) {
+          aoProgresso(100, {
+            workers: 0,
+            currentPage: 0,
+            totalPages: 0,
+            citiesCollected: cidadesArquivo.length,
+            fromFile: true,
+            completed: true,
+          });
+        }
+
+        // Salva no cache para uso futuro (se ainda não estiver em cache)
+        try {
+          const cacheExistente = await carregarCacheCidades();
+          if (!cacheExistente || cacheExistente.length < cidadesArquivo.length) {
+            await salvarCacheCidades(cidadesArquivo);
+            console.log(`Cache atualizado com dados do arquivo estático`);
+          }
+        } catch (erro) {
+          console.warn("Erro ao salvar arquivo no cache:", erro);
+        }
+
+        // Retorna cidades do arquivo (limitado ao alvo se necessário)
+        return cidadesArquivo.slice(0, cidadesAlvo);
+      }
+    } catch (erro) {
+      console.warn("Erro ao carregar arquivo estático, tentando cache:", erro);
+    }
+
+    // 2. SEGUNDA PRIORIDADE: Verifica cache IndexedDB/LocalStorage
+    const cache = await carregarCacheCidades();
+    if (cache && cache.length > 0) {
+      console.log(`Cache encontrado: ${cache.length} cidades. Usando dados em cache.`);
+      
+      // Notifica progresso de cache
+      if (aoProgresso) {
+        aoProgresso(100, {
+          workers: 0,
+          currentPage: 0,
+          totalPages: 0,
+          citiesCollected: cache.length,
+          fromCache: true,
+          completed: true,
+        });
+      }
+
+      // Retorna cache se tiver quantidade suficiente ou se for menor que o alvo
+      if (cache.length >= cidadesAlvo || cache.length >= 1000) {
+        return cache.slice(0, cidadesAlvo);
+      } else {
+        console.log(`Cache tem apenas ${cache.length} cidades, mas precisamos de ${cidadesAlvo}. Coletando mais...`);
+        // Continua para coletar mais cidades
+      }
+    }
+  } else {
+    console.log("Atualização forçada: ignorando arquivo estático e cache, coletando dados da rede");
+  }
+
+  // 3. TERCEIRA PRIORIDADE: Cache não encontrado ou insuficiente: coleta da rede
+  console.log("Coletando cidades da rede...");
+  const cidadesColetadas = await coletarCidadesParalelo(cidadesAlvo, limitePorPagina, aoProgresso);
+
+  // Salva no cache para uso futuro
+  if (cidadesColetadas && cidadesColetadas.length > 0) {
+    try {
+      await salvarCacheCidades(cidadesColetadas);
+      console.log(`Cache atualizado com ${cidadesColetadas.length} cidades`);
+    } catch (erro) {
+      console.warn("Erro ao salvar cache:", erro);
+    }
+  }
+
+  return cidadesColetadas;
+};
 
 export const coletarCidadesParalelo = async (cidadesAlvo = 10000, limitePorPagina = 10, aoProgresso) => {
   const usarMemoriaCompartilhada = sharedArrayBufferDisponivel();

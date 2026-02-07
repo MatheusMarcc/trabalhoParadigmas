@@ -38,6 +38,18 @@ aplicacao.use(express.static(caminho.join(__dirname, "public"), {
   }
 }));
 
+// Serve arquivos estáticos da pasta data
+aplicacao.use('/data', express.static(caminho.join(__dirname, "data"), {
+  etag: true,
+  lastModified: true,
+  setHeaders: (resposta, caminhoArquivo) => {
+    if (caminhoArquivo.endsWith('.json') || caminhoArquivo.endsWith('.json.bak')) {
+      resposta.setHeader('Content-Type', 'application/json; charset=utf-8');
+      resposta.setHeader('Cache-Control', 'public, max-age=86400'); // Cache por 1 dia
+    }
+  }
+}));
+
 aplicacao.use(webRoutes);
 aplicacao.use(apiRoutes);
 aplicacao.use(errorHandler);

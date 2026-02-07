@@ -16,7 +16,7 @@ import {
   renderizarListaCidadesSelecionadas,
   atualizarContadorSelecionadas,
 } from "../views/CidadeView.js";
-import { coletarCidadesParalelo } from "../services/coletaDados.js";
+import { carregarCidadesComCache } from "../services/coletaDados.js";
 import { executarKmeans } from "../services/kmeans.js";
 import { renderizarClusters, renderizarGraficoClusters, mostrarProgressoClustering } from "../views/ClusterView.js";
 
@@ -340,25 +340,39 @@ const manipularIniciarColeta = async () => {
         if (textoProgresso) textoProgresso.textContent = `${Math.round(progresso)}%`;
 
         if (detalhesProgresso) {
-          if (estatisticas?.rateLimit) {
+          if (estatisticas?.fromFile) {
+            detalhesProgresso.textContent = `Carregando do arquivo estático... ${estatisticas?.citiesCollected ?? 0} cidades`;
+            barraProgresso?.classList.remove("bg-danger", "bg-warning");
+            barraProgresso?.classList.add("bg-success");
+          } else if (estatisticas?.fromCache) {
+            detalhesProgresso.textContent = `Carregando do cache... ${estatisticas?.citiesCollected ?? 0} cidades`;
+            barraProgresso?.classList.remove("bg-danger", "bg-warning");
+            barraProgresso?.classList.add("bg-success");
+          } else if (estatisticas?.rateLimit) {
             detalhesProgresso.textContent = `Rate limit atingido. Aguardando ${estatisticas.waitTime}s antes de continuar...`;
-            barraProgresso?.classList.remove("bg-warning");
+            barraProgresso?.classList.remove("bg-warning", "bg-success");
             barraProgresso?.classList.add("bg-danger");
           } else {
             detalhesProgresso.textContent = `Coletando dados... ${estatisticas?.citiesCollected ?? 0} cidades`;
-            barraProgresso?.classList.remove("bg-danger");
+            barraProgresso?.classList.remove("bg-danger", "bg-success");
             barraProgresso?.classList.add("bg-warning");
           }
         }
         if (estatisticasProgresso) {
           const statusMemoria =
             typeof SharedArrayBuffer !== "undefined" ? " | Memória Compartilhada: Ativa" : " | Modo: Fallback";
-          estatisticasProgresso.textContent = `Workers: ${estatisticas?.workers ?? 1} | Página: ${estatisticas?.currentPage ?? 0}/${estatisticas?.totalPages ?? 0}${statusMemoria}`;
+          const statusFonte = estatisticas?.fromFile
+            ? " | Fonte: Arquivo Estático"
+            : estatisticas?.fromCache
+            ? " | Fonte: Cache"
+            : "";
+          estatisticasProgresso.textContent = `Workers: ${estatisticas?.workers ?? 1} | Página: ${estatisticas?.currentPage ?? 0}/${estatisticas?.totalPages ?? 0}${statusMemoria}${statusFonte}`;
         }
       });
     };
 
-    cidadesColetadas = await coletarCidadesParalelo(cidadesAlvo, 10, atualizarBarra);
+    // Verifica cache primeiro, depois coleta da rede se necessário
+    cidadesColetadas = await carregarCidadesComCache(cidadesAlvo, 10, atualizarBarra, false);
 
     const tempoFim = Date.now();
     const segundosDecorridos = Math.round((tempoFim - tempoInicio) / 1000);

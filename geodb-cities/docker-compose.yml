@@ -1,30 +1,55 @@
+version: '3.8'
+
 services:
+  node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geodb-cities-node
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-3000}
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY}
+    volumes:
+      # Monta o cÃ³digo fonte para hot-reload com nodemon
+      - ./app:/home/node/app
+      - /home/node/app/node_modules
+    ports:
+      - "${PORT:-3000}:3000"
+    networks:
+      - geodb-network
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   nginx:
     build:
       context: ./nginx
       dockerfile: Dockerfile
-    volumes:
-      - ./nginx/static-html-directory:/usr/share/nginx/html
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    restart: always
+    container_name: geodb-cities-nginx
+    restart: unless-stopped
     ports:
-      - "8080:80"
-    container_name: nginx-server
-
-
-  node:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/static-html-directory:/usr/share/nginx/html:ro
+    networks:
+      - geodb-network
     depends_on:
-      - nginx
-    build:
-      context: .
-      dockerfile: Dockerfile
-    volumes:
-      - ./app:/home/node/app
-    restart: always
-    environment:
-      PORT: ${PORT}
-      RAPIDAPI_KEY: ${RAPIDAPI_KEY}
-    ports:
-      - "3000:3000"
-    container_name: node-app
+      node:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/run/nginx.pid && wget --spider --quiet http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  geodb-network:
+    driver: bridge
+    name: geodb-network
